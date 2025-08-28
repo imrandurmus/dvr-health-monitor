@@ -7,7 +7,7 @@ using System.Threading.Tasks;
 
 namespace DvrWorker.Data;
 
-public interface ISnapshotRepository
+public interface IHealthCheckRepository
 {
-    Task InserAsync(SnapshotDoc doc, CancellationToken ct);
+    Task InsertAsync(HealthCheckDoc doc, CancellationToken ct);
 }

@@ -8,6 +8,7 @@ using Microsoft.Extensions.Hosting;
 using Microsoft.Extensions.Options;
 using Microsoft.Extensions.DependencyInjection;
 
+
 var builder = Host.CreateApplicationBuilder(args);
 
 
@@ -49,5 +50,8 @@ builder.Services.Configure<SnapshotStorageOptions>(
 builder.Services.AddSingleton<ISnapshotStorage, SnapshotStorage>();
 
 builder.Services.AddSingleton<IImageAnalyzer, ImageAnalyzer>();
+
+builder.Services.AddSingleton<IHealthCheckRepository, HealthCheckRepository>();
+
 var host = builder.Build();
 host.Run();

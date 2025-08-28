@@ -3,6 +3,7 @@ using DvrWorker.Configurations;
 using DvrWorker.Services;
 using Microsoft.Extensions.Options;
 using System.Linq;
+using DvrWorker.Models;
 
 namespace DvrWorker;
 
@@ -14,6 +15,7 @@ public class Worker : BackgroundService
     private readonly SnapshotOptions _snapOptions;
     private readonly ISnapshotStorage _snapshotStorage;
     private readonly IImageAnalyzer _analyzer;
+    private readonly IHealthCheckRepository _healthCheckRepo;
 
     private DateOnly _lastCleanup = DateOnly.MinValue;
 
@@ -23,7 +25,8 @@ public class Worker : BackgroundService
         ISnapshotService snapshot,
         IOptions<SnapshotOptions> snapOptions,
         ISnapshotStorage snapsStore,
-        IImageAnalyzer analyzer)
+        IImageAnalyzer analyzer,
+        IHealthCheckRepository healthCheckRepo)
     {
         _logger = logger;
         _repo = repo;
@@ -31,6 +34,7 @@ public class Worker : BackgroundService
         _snapOptions = snapOptions.Value;
         _snapshotStorage = snapsStore;
         _analyzer = analyzer;
+        _healthCheckRepo = healthCheckRepo;
     }
 
 
@@ -99,6 +103,40 @@ public class Worker : BackgroundService
                         {
                             _logger.LogWarning("Image looks single-color for d={Device} ch={Channel}", d.Name ?? d.Id, ch.Id);
                         }
+
+                        // Health Check logging
+
+                        var cam = new HealthCheckCamera
+                        {
+                            ChannelId = ch.Id,
+                            Metrics = metrics,
+                            SnapshotInfo = new SnapshotInfo
+                            {
+                                Path = savedPath,
+                                Bytes = jpegBytes.Length
+                            }
+                        };
+
+                        if (_analyzer.IsBlurry(metrics)) cam.Issues.Add("BLUR");
+                        if (_analyzer.IsSingleColor(metrics)) cam.Issues.Add("SINGLE_COLOR");
+
+                        cam.Ok = cam.Issues.Count == 0;
+
+                        var hc = new HealthCheckDoc
+                        {
+                            DeviceId = d.Id,
+                            StartedAt = DateTimeOffset.UtcNow,
+                            FinishedAt = DateTimeOffset.UtcNow,
+                            Ok = cam.Ok,
+                            Summary = new HealthCheckSummary
+                            {
+                                TotalCameras = d.Channels.Count,
+                                Failures = cam.Ok ? 1 : 0
+                            },
+                            Cameras = new List<HealthCheckCamera> { cam }
+                        };
+
+                        await _healthCheckRepo.InsertAsync(hc, stoppingToken);
                     }
                     catch (Exception ex)
                     {
