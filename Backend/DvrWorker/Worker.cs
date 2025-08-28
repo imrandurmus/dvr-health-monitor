@@ -2,6 +2,7 @@ using DvrWorker.Data;
 using DvrWorker.Configurations;
 using DvrWorker.Services;
 using Microsoft.Extensions.Options;
+using System.Linq;
 
 namespace DvrWorker;
 
@@ -11,17 +12,22 @@ public class Worker : BackgroundService
     private readonly IDevicesRepository _repo;
     private readonly ISnapshotService _snapshot;
     private readonly SnapshotOptions _snapOptions;
+    private readonly ISnapshotStorage _snapshotStorage;
+
+    private DateOnly _lastCleanup = DateOnly.MinValue;
 
     public Worker(
         ILogger<Worker> logger,
         IDevicesRepository repo,
         ISnapshotService snapshot,
-        IOptions<SnapshotOptions> snapOptions)
+        IOptions<SnapshotOptions> snapOptions,
+        ISnapshotStorage snapsStore)
     {
         _logger = logger;
         _repo = repo;
         _snapshot = snapshot;
         _snapOptions = snapOptions.Value;
+        _snapshotStorage = snapsStore;
     }
 
 
@@ -29,8 +35,8 @@ public class Worker : BackgroundService
     {
         await _repo.SeedIfEmptyAsync(stoppingToken);
 
-        Directory.CreateDirectory(_snapOptions.OutputDir);
-        int counter = 0;
+        
+        
 
         while (!stoppingToken.IsCancellationRequested)
         {
@@ -43,28 +49,59 @@ public class Worker : BackgroundService
             }
             else
             {
-                _logger.LogInformation("Found {n} devices", devices.Count);
+                _logger.LogInformation("Found {Count} devices", devices.Count);
                 foreach (var d in devices)
                 {
-                    _logger.LogInformation("Camera {Name} {Ip} - {Count} channels",
+                    _logger.LogInformation("Camera {Name} {Ip} - {ChannelCount} channels",
                         d.Name, d.Ip, d.Channels.Count);
                 }
             }
 
             //fetch and save snapshot (currently fake)
-            try
+            foreach (var d in devices)
             {
-                var bytes = await _snapshot.GetSnapshotAsync(_snapOptions.Url, stoppingToken);
-                var path = Path.Combine(_snapOptions.OutputDir, $"snap_{counter++}.jpg");
-                await File.WriteAllBytesAsync(path, bytes, stoppingToken);
-                _logger.LogInformation("Saved snapshot: {Path} ({size} bytes)", path, bytes.Length);
-                _logger.LogInformation("Snapshot output directory: {dir}", _snapOptions.OutputDir);
+                foreach (var ch in d.Channels.Where(c => c.Enabled))
+                {
+                    try
+                    {
+                        //Stub fetch
+                        var jpegBytes = await _snapshot.GetSnapshotAsync(_snapOptions.Url, stoppingToken);
+                        if (jpegBytes is null || jpegBytes.Length == 0)
+                        {
+                            _logger.LogWarning("Empty snapshot for {Device}/{Channel}", d.Name ?? d.Id, ch.Id);
+                            continue;
+                        }
+                        var savedPath = await _snapshotStorage.SaveAsync(
+                        device: d,
+                        channelId: ch.Id,
+                        jpegBytes: jpegBytes,
+                        when: DateTimeOffset.UtcNow,
+                        ct: stoppingToken);
+                        _logger.LogInformation("Saved snapshot d={Device} ch={Channel} -> {Path}",
+                            d.Name ?? d.Id, ch.Id, savedPath);
+                    }
+                    catch (Exception ex)
+                    {
+                        _logger.LogWarning(ex, "Snapshot fetch/save failed for {Device}/{Channel}", d.Name ?? d.Id, ch.Id);
+                    }
+                }
             }
-            catch (Exception ex)
+
+            var today = DateOnly.FromDateTime(DateTime.UtcNow);
+            if(today != _lastCleanup)
             {
-                _logger.LogWarning(ex, "Snapshot fetch failed from {Url}", _snapOptions.Url);
+                _lastCleanup = today;
+                try
+                {
+                    var deleted = await _snapshotStorage.CleanupOldAsync(stoppingToken);
+                    if (deleted > 0)
+                        _logger.LogInformation("Snapshot cleanup removed {Count} old files.", deleted);
+                }
+                catch(Exception ex)
+                {
+                    _logger.LogWarning(ex, "Snapshot cleanup failed");
+                }
             }
-            
             var interval = Math.Max(1, _snapOptions.IntervalSeconds);
             await Task.Delay(TimeSpan.FromSeconds(interval), stoppingToken);
         }

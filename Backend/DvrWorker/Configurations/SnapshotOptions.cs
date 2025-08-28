@@ -1,10 +1,16 @@
+using System.ComponentModel.DataAnnotations;
+
 namespace DvrWorker.Configurations;
 
 public sealed class SnapshotOptions
 {
-    public string Url { get; set; } = "https//picsum.photos/200"; // the fake snapshot for day 3 
+    [Required, Url]
+    public string Url { get; set; } = "https://picsum.photos/200"; // the fake snapshot for day 3 
 
+    [Range(1, 3600)]
     public int IntervalSeconds { get; set; } = 30;   // saving every 30 seconds
 
-    public string OutputDir { get; set; } = "Snapshots"; // Local folder
+    [Range(1, 60)]
+    public int TimeoutSeconds { get; set; } = 5;
+    
 }

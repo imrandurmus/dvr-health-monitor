@@ -18,7 +18,9 @@ builder.Services.Configure<MongoOptions>(builder.Configuration.GetSection("Mongo
 builder.Services.AddSingleton<IMongoClient>(sp =>
 {
     var opts = sp.GetRequiredService<IOptions<MongoOptions>>().Value;
-    return new MongoClient(opts.ConnectionString);
+    var mongoDb = new MongoClient(opts.ConnectionString);
+    mongoDb.GetDatabase(opts.Database);
+    return mongoDb;
 });
 
 // Registering IMongoDatabase
@@ -29,13 +31,23 @@ builder.Services.AddSingleton<IMongoDatabase>(sp =>
 });
 
 // binding the snapshot options we made in SnapshotOptions 
-builder.Services.Configure<SnapshotOptions>(builder.Configuration.GetSection("Snapshot"));
+builder.Services
+    .AddOptions<SnapshotOptions>()
+    .Bind(builder.Configuration.GetSection("Snapshot"))
+    .ValidateDataAnnotations()
+    .Validate(o => o.IntervalSeconds >= 1, "Interval must be >= 1")
+    .ValidateOnStart();
 
 // Registering the snapshot service (typed Http for today's implementation)
 builder.Services.AddHttpClient<ISnapshotService, HttpSnapshotService>();
 
 builder.Services.AddSingleton<IDevicesRepository, DevicesRepository>();
 builder.Services.AddHostedService<Worker>();
+
+builder.Services.Configure<SnapshotOptions>(
+    builder.Configuration.GetSection("SnapshotStorage"));
+
+builder.Services.AddSingleton<ISnapshotStorage, SnapshotStorage>();
 
 var host = builder.Build();
 host.Run();
