@@ -13,6 +13,7 @@ public class Worker : BackgroundService
     private readonly ISnapshotService _snapshot;
     private readonly SnapshotOptions _snapOptions;
     private readonly ISnapshotStorage _snapshotStorage;
+    private readonly IImageAnalyzer _analyzer;
 
     private DateOnly _lastCleanup = DateOnly.MinValue;
 
@@ -21,13 +22,15 @@ public class Worker : BackgroundService
         IDevicesRepository repo,
         ISnapshotService snapshot,
         IOptions<SnapshotOptions> snapOptions,
-        ISnapshotStorage snapsStore)
+        ISnapshotStorage snapsStore,
+        IImageAnalyzer analyzer)
     {
         _logger = logger;
         _repo = repo;
         _snapshot = snapshot;
         _snapOptions = snapOptions.Value;
         _snapshotStorage = snapsStore;
+        _analyzer = analyzer;
     }
 
 
@@ -79,6 +82,23 @@ public class Worker : BackgroundService
                         ct: stoppingToken);
                         _logger.LogInformation("Saved snapshot d={Device} ch={Channel} -> {Path}",
                             d.Name ?? d.Id, ch.Id, savedPath);
+
+                        //The analysis section
+                        var metrics = _analyzer.Measure(jpegBytes);
+
+                        _logger.LogInformation(
+                            "Analysis d={Device} ch={Channel} blurVar = {LapVar:F1} lumaStd={LumaStd:F1}",
+                            d.Name ?? d.Id, ch.Id, metrics.LaplacianVariance, metrics.LumaStdDev);
+
+                        if (_analyzer.IsBlurry(metrics))
+                        {
+                            _logger.LogWarning("Image is blurry for d={Device} ch={Channel}", d.Name ?? d.Id, ch.Id);
+                        }
+
+                        if (_analyzer.IsSingleColor(metrics))
+                        {
+                            _logger.LogWarning("Image looks single-color for d={Device} ch={Channel}", d.Name ?? d.Id, ch.Id);
+                        }
                     }
                     catch (Exception ex)
                     {
@@ -86,6 +106,9 @@ public class Worker : BackgroundService
                     }
                 }
             }
+
+           
+
 
             var today = DateOnly.FromDateTime(DateTime.UtcNow);
             if(today != _lastCleanup)

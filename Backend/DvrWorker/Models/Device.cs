@@ -14,7 +14,7 @@ public sealed class Device
     public string Password { get; set; } = default!; // TODO: Encrypt 
 
 
-    public List<Channel> Channels = new();
+    public List<Channel> Channels { get; set; } = new();
     public bool IsEnabled { get; set; } = true;
 }
 

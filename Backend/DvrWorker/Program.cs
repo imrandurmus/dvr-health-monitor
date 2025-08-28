@@ -19,7 +19,6 @@ builder.Services.AddSingleton<IMongoClient>(sp =>
 {
     var opts = sp.GetRequiredService<IOptions<MongoOptions>>().Value;
     var mongoDb = new MongoClient(opts.ConnectionString);
-    mongoDb.GetDatabase(opts.Database);
     return mongoDb;
 });
 
@@ -44,10 +43,11 @@ builder.Services.AddHttpClient<ISnapshotService, HttpSnapshotService>();
 builder.Services.AddSingleton<IDevicesRepository, DevicesRepository>();
 builder.Services.AddHostedService<Worker>();
 
-builder.Services.Configure<SnapshotOptions>(
+builder.Services.Configure<SnapshotStorageOptions>(
     builder.Configuration.GetSection("SnapshotStorage"));
 
 builder.Services.AddSingleton<ISnapshotStorage, SnapshotStorage>();
 
+builder.Services.AddSingleton<IImageAnalyzer, ImageAnalyzer>();
 var host = builder.Build();
 host.Run();
