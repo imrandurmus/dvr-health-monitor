@@ -7,7 +7,8 @@ using DvrWorker.Services;
 using Microsoft.Extensions.Hosting;
 using Microsoft.Extensions.Options;
 using Microsoft.Extensions.DependencyInjection;
-
+using Quartz;
+using DvrWorker.Jobs;
 
 var builder = Host.CreateApplicationBuilder(args);
 
@@ -42,7 +43,9 @@ builder.Services
 builder.Services.AddHttpClient<ISnapshotService, HttpSnapshotService>();
 
 builder.Services.AddSingleton<IDevicesRepository, DevicesRepository>();
-builder.Services.AddHostedService<Worker>();
+
+// WORKER CLASS
+//builder.Services.AddHostedService<Worker>();
 
 builder.Services.Configure<SnapshotStorageOptions>(
     builder.Configuration.GetSection("SnapshotStorage"));
@@ -52,6 +55,31 @@ builder.Services.AddSingleton<ISnapshotStorage, SnapshotStorage>();
 builder.Services.AddSingleton<IImageAnalyzer, ImageAnalyzer>();
 
 builder.Services.AddSingleton<IHealthCheckRepository, HealthCheckRepository>();
+
+builder.Services.AddQuartz(q =>
+{
+    var jobKey = new JobKey("HealthCheckJob");
+    
+    q.AddJob<HealthCheckJob>(opts => opts.WithIdentity(jobKey));
+
+    q.AddTrigger(opts => opts
+    .ForJob(jobKey)
+    .WithIdentity("HealthCheckJob-trigger")
+    .StartNow()
+    .WithSimpleSchedule(x => x
+    .WithIntervalInMinutes(30)
+    .RepeatForever()));
+
+});
+builder.Services.AddQuartz(q =>
+{
+    q.ScheduleJob<CleanupJob>(trigger => trigger
+    .WithIdentity("CleanupJob")
+    .StartNow()
+    .WithCronSchedule("0 0 0 * * ?"));
+});
+
+builder.Services.AddQuartzHostedService(q => q.WaitForJobsToComplete = true);
 
 var host = builder.Build();
 host.Run();
